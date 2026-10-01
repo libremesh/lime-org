@@ -46,3 +46,40 @@ The cronjob added (as root)
 ```
 45 5 * * * /builder/remove_old_firmware_and_podman_images.sh
 ```
+
+2026-10-01 Added a crontab to remove imagebuilders of not main/master/stable/oldstable/upcoming release once a month
+
+Content of `/builder/remove_old_podman_images.sh`
+```
+#!/bin/sh
+
+which jq || exit 0
+which awk || exit 0
+registry_image="ghcr.io/openwrt/imagebuilder"
+# Stop on http error i.e. if the file is not a json file
+versions_json=$(curl -fs -H "Accept: application/json" https://downloads.openwrt.org/.versions.json)
+[ -n "$versions_json" ] || exit 0
+stable_version=$(echo "$versions_json" | jq -r '.stable_version')
+oldstable_version=$(echo "$versions_json" | jq -r '.oldstable_version')
+upcoming_version=$(echo "$versions_json" | jq -r '.upcoming_version')
+
+preserve="main|master|$stable_version|$oldstable_version"
+if [ -n "$upcoming_version" ]; then
+	preserve="$preserve|$upcoming_version"
+fi
+echo "Preserving versions $preserve"
+
+su - builder -c "
+cd /builder
+podman images |
+	grep '$registry_image' | 
+	grep -Ev '$preserve' |
+	awk '{ print Removing \$1 \$2 }' 
+
+podman rmi \$(podman images |
+	grep '$registry_image' |
+	grep -Ev '$preserve' |
+	awk '{ print \$3 }' 
+)
+"
+```
